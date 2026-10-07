@@ -1,0 +1,81 @@
+{
+  "spec": "WEBTRANSPORT",
+  "sha": "hash:d9a41c520c28686d38d18ddbb62bece2b47d0f6056a7b1409fea8f614bf20934",
+  "anchor": "dom-webtransportsendstream-getstats",
+  "url": "https://w3c.github.io/webtransport/#dom-webtransportsendstream-getstats",
+  "title": "getStats()",
+  "type": "algorithm",
+  "content": "\n\n**`getStats()`**\n\nGathers stats specific to this [`WebTransportSendStream`](https://w3c.github.io/webtransport#webtransportsendstream)’s performance, and reports the result asynchronously.\n\nWhen called, the user agent MUST run these steps:\n\n1. Let *transport* be [this](https://webidl.spec.whatwg.org/#this).`[[[Transport]]](https://w3c.github.io/webtransport#dom-webtransportsendstream-transport-slot)`.\n2. Let *p* be a new promise.\n3. Run the following steps [in parallel](https://html.spec.whatwg.org/multipage/infrastructure.html#in-parallel):\n\n    1. Let *gatheredStats* be the [list](https://infra.spec.whatwg.org/#list) of stats specific to [this](https://webidl.spec.whatwg.org/#this) [`WebTransportSendStream`](https://w3c.github.io/webtransport#webtransportsendstream) needed to populate the [dictionary members](https://webidl.spec.whatwg.org/#dfn-dictionary-member) of [`WebTransportSendStreamStats`](https://w3c.github.io/webtransport#dictdef-webtransportsendstreamstats) accurately.\n    2. [Queue a network task](https://w3c.github.io/webtransport#webtransport-queue-a-network-task) with *transport* to run the following steps:\n\n        1. Let *stats* be a [new](https://webidl.spec.whatwg.org/#new) [`WebTransportSendStreamStats`](https://w3c.github.io/webtransport#dictdef-webtransportsendstreamstats) object.\n        2. For each [member](https://webidl.spec.whatwg.org/#dfn-dictionary-member) *member* of *stats* that the user agent wishes to expose, [set](https://infra.spec.whatwg.org/#map-set) *member* to the the corresponding [entry](https://infra.spec.whatwg.org/#map-entry) in *gatheredStats*.\n        3. [Resolve](http://www.ecma-international.org/ecma-262/6.0/index.html#sec-promise-objects) *p* with *stats*.\n4. Return *p*.",
+  "navigation": {
+    "parent": {
+      "anchor": "send-stream-methods",
+      "title": "Methods"
+    },
+    "prev": null,
+    "next": {
+      "anchor": "dom-webtransportsendstream-getwriter",
+      "title": "getWriter()"
+    },
+    "children": []
+  },
+  "outgoing_refs": [
+    {
+      "spec": "WEBTRANSPORT",
+      "anchor": "webtransportsendstream"
+    },
+    {
+      "spec": "WEBIDL",
+      "anchor": "this"
+    },
+    {
+      "spec": "WEBTRANSPORT",
+      "anchor": "dom-webtransportsendstream-transport-slot"
+    },
+    {
+      "spec": "HTML",
+      "anchor": "in-parallel"
+    },
+    {
+      "spec": "INFRA",
+      "anchor": "list"
+    },
+    {
+      "spec": "WEBIDL",
+      "anchor": "dfn-dictionary-member"
+    },
+    {
+      "spec": "WEBTRANSPORT",
+      "anchor": "dictdef-webtransportsendstreamstats"
+    },
+    {
+      "spec": "WEBTRANSPORT",
+      "anchor": "webtransport-queue-a-network-task"
+    },
+    {
+      "spec": "WEBIDL",
+      "anchor": "new"
+    },
+    {
+      "spec": "INFRA",
+      "anchor": "map-set"
+    },
+    {
+      "spec": "INFRA",
+      "anchor": "map-entry"
+    }
+  ],
+  "incoming_refs": [
+    {
+      "spec": "WEBTRANSPORT",
+      "anchor": "send-stream"
+    },
+    {
+      "spec": "WEBTRANSPORT",
+      "anchor": "index-defined-here"
+    },
+    {
+      "spec": "WEBTRANSPORT",
+      "anchor": "idl-index"
+    }
+  ]
+}

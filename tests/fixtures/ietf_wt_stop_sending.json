@@ -1,0 +1,117 @@
+{
+  "spec": "draft-ietf-webtrans-http2",
+  "sha": "hash:31e1a51f0dcf1c6636477905d998a6dd7fb687e8b2a02becfa6b436171f2754f",
+  "anchor": "name-wt_stop_sending-capsule",
+  "url": "https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#name-wt_stop_sending-capsule",
+  "title": "6.3. WT_STOP_SENDING Capsule",
+  "type": "heading",
+  "content": "An HTTP capsule \\[[HTTP-DATAGRAM](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#HTTP-DATAGRAM)\\] called [WT\\_STOP\\_SENDING](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#WT_STOP_SENDING) (type=0x190B4D3A) is introduced to communicate that incoming data is being discarded on receipt per application request. [WT\\_STOP\\_SENDING](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#WT_STOP_SENDING) requests that a peer cease transmission on a WebTransport stream.[¶](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#section-6.3-1)\n\nWT_STOP_SENDING Capsule {\n  Type (i) = 0x190B4D3A,\n  Length (i),\n  Stream ID (i),\n  Application Protocol Error Code (i),\n}\n\n[Figure 4](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#figure-4): [WT\\_STOP\\_SENDING Capsule Format](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#name-wt_stop_sending-capsule-for) \n\nThe [WT\\_STOP\\_SENDING](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#WT_STOP_SENDING) capsule defines the following fields:[¶](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#section-6.3-3)\n\nStream ID:\n\nA variable-length integer carrying the WebTransport stream ID of the stream being ignored.[¶](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#section-6.3-4.2.1)\n\nApplication Protocol Error Code:\n\nA variable-length integer containing the application-specified reason the sender is ignoring the stream. WebTransport application error codes are constrained to an unsigned 32-bit range defined in [Section 4.4](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3-15#section-4.4) of \\[[WEBTRANSPORT-H3](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#WEBTRANSPORT-H3)\\]. This value MUST NOT exceed 0xffffffff, values larger than this MUST be treated as a session error of type WT\\_ERROR.[¶](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#section-6.3-4.4.1)\n\nAs defined in [Section 3.5](https://rfc-editor.org/rfc/rfc9000#section-3.5) of \\[[RFC9000](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#RFC9000)\\], the recipient of a [WT\\_STOP\\_SENDING](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#WT_STOP_SENDING) capsule sends a [WT\\_RESET\\_STREAM](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#WT_RESET_STREAM) capsule in response if the stream is in the \"Ready\" or \"Send\" state. The error code from the [WT\\_STOP\\_SENDING](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#WT_STOP_SENDING) capsule can be copied into the [WT\\_RESET\\_STREAM](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#WT_RESET_STREAM) capsule if the endpoint does not have a more appropriate code to use.[¶](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#section-6.3-5)\n\nA [WT\\_STOP\\_SENDING](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#WT_STOP_SENDING) capsule MUST NOT be sent multiple times for the same stream. While QUIC permits redundant STOP\\_SENDING frames, the ordering guarantee in HTTP/2 makes this unnecessary. A [stream error](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#errors) ([Section 3.4](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#errors)) of type WT\\_STREAM\\_STATE\\_ERROR MUST be sent if a second [WT\\_STOP\\_SENDING](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#WT_STOP_SENDING) capsule is received.[¶](https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-15.html#section-6.3-6)",
+  "navigation": {
+    "parent": {
+      "anchor": "name-webtransport-capsules",
+      "title": "6. WebTransport Capsules"
+    },
+    "prev": {
+      "anchor": "name-wt_reset_stream-capsule",
+      "title": "6.2. WT_RESET_STREAM Capsule"
+    },
+    "next": {
+      "anchor": "name-wt_stream-capsule",
+      "title": "6.4. WT_STREAM Capsule"
+    },
+    "children": [
+      {
+        "anchor": "section-6.3-4.1",
+        "title": "Stream ID:"
+      },
+      {
+        "anchor": "section-6.3-4.3",
+        "title": "Application Protocol Error Code:"
+      },
+      {
+        "anchor": "section-6.4",
+        "title": "6.4. WT_STREAM Capsule\n        \nWT_STREAM capsules implicitly create a WebTransport stream and carry stream\ndata.¶\nThe …"
+      }
+    ]
+  },
+  "outgoing_refs": [
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "section-6.3"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "name-wt_stop_sending-capsule"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "HTTP-DATAGRAM"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "WT_STOP_SENDING"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "section-6.3-1"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "figure-4"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "name-wt_stop_sending-capsule-for"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "section-6.3-3"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "section-6.3-4.2.1"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http3",
+      "anchor": "section-4.4"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "WEBTRANSPORT-H3"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "section-6.3-4.4.1"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "RFC9000"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "WT_RESET_STREAM"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "section-6.3-5"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "errors"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "section-6.3-6"
+    }
+  ],
+  "incoming_refs": [
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "name-table-of-contents"
+    },
+    {
+      "spec": "draft-ietf-webtrans-http2",
+      "anchor": "name-wt_stop_sending-capsule"
+    }
+  ]
+}
