@@ -134,3 +134,17 @@ def test_binary_file(tmp_path):
     f.write_bytes(b"ab\x00cd\n")
     with pytest.raises(ingest.IngestError, match="binary"):
         ingest.load(str(f))
+
+
+def test_source_recorded(monkeypatch, tmp_path, diff_text):
+    f = tmp_path / "my.patch"
+    f.write_text(diff_text)
+    assert ingest.load(str(f)).source == str(f)
+    monkeypatch.setattr(ingest, "_http_get", lambda url: diff_text)
+    assert ingest.load("D123").source == "D123"
+    monkeypatch.setattr(ingest.sys, "stdin", io.StringIO(diff_text))
+    assert ingest.load("-").source == "stdin"
+    monkeypatch.setattr(
+        ingest, "_jj", lambda args, repo: diff_text if "diff" in args else "x"
+    )
+    assert ingest.load("jj:@-", repo="/r").source == "jj:@-"

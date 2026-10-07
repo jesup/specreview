@@ -1,11 +1,15 @@
 import json
+import sys
 import tempfile
+import time
 from pathlib import Path
 
 import uvicorn
 
 from specreview.diffparse import parse_diff
-from specreview.models import Analysis, Finding, Link, Range, SpecDoc, Unmapped
+from specreview.models import (
+    Analysis, ComplianceEvidence, ComplianceIssue, ComplianceResult, Finding, Link, Range, SpecDoc, Unmapped,
+)
 from specreview.server import ReviewState, create_app
 from specreview.spec import parse_steps
 from specreview.store import Overrides
@@ -88,12 +92,39 @@ def analysis(patch, d: SpecDoc, ietf: SpecDoc) -> Analysis:
     return Analysis(patch_id=patch.id, docs=[d, ietf], links=links, unmapped=unmapped, findings=findings, warnings=["demo data"])
 
 
+def fake_checker(done: dict):
+    def check(step_id, force):
+        time.sleep(1)
+        result = ComplianceResult(
+            step_id=step_id,
+            verdict="partial",
+            summary="Demo result: the code clamps the values instead of exposing them directly.",
+            issues=[
+                ComplianceIssue(text="Values are clamped before use.", severity="warn", file=CPP, line=213),
+                ComplianceIssue(text="Cached fallback is not in the spec.", severity="info", file=CPP, line=224),
+                ComplianceIssue(text="A caller outside the patch is unchecked.", severity="error", file="dom/other.cpp", line=7),
+            ],
+            evidence=[ComplianceEvidence(file=CPP, line=234, note="Resolves the promise with the stats.")],
+            context_used=["local repo", "searchfox"],
+        )
+        done[step_id] = result
+        return result
+
+    return check
+
+
 def main():
     patch = parse_diff((HERE / "getstats.patch").read_text(), "demo")
     result = analysis(patch, doc(), doc("ietf_wt_stop_sending.json"))
     root = Path(tempfile.mkdtemp(prefix="specreview-demo-"))
-    state = ReviewState(patch, result, Overrides(root, patch), lambda refs: result)
-    uvicorn.run(create_app(state), host="127.0.0.1", port=8766)
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8766
+    ai = "--no-ai" not in sys.argv
+    done = {}
+    state = ReviewState(
+        patch, result, Overrides(root, patch), lambda refs: result,
+        checker=fake_checker(done), ai_enabled=ai, cached_checks=lambda: dict(done),
+    )
+    uvicorn.run(create_app(state), host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":

@@ -157,3 +157,38 @@ def test_exists(monkeypatch):
     )
     assert spec.spec_exists("good")
     assert not spec.spec_exists("bad")
+
+
+MULTI = (
+    "When the constructor runs, perform these steps:\n\n"
+    "1. Let *a* be 1.\n"
+    "2. For each *x*:\n\n"
+    "    1. Do it.\n"
+    "3. Return.\n\n"
+    "To **obtain a connection**, given *k*:\n\n"
+    "1. Let *t* be a thing.\n"
+    "2. For each *y*:\n\n"
+    "    1. Do that.\n"
+    "    2. And this.\n"
+    "3. Finish.\n"
+)
+
+
+def test_restarted_numbering_gets_unique_ids_and_groups():
+    steps = spec.parse_steps("W", "ctor", MULTI)
+    ids = [s.id for s in steps]
+    assert len(ids) == len(set(ids))
+    assert [s.number for s in steps] == [
+        "1", "2", "2.1", "3", "L2/1", "L2/2", "L2/2.1", "L2/2.2", "L2/3",
+    ]
+    by = {s.number: s for s in steps}
+    assert by["L2/2.1"].parent == "W#ctor:L2/2"
+    assert by["2.1"].parent == "W#ctor:2"
+    assert by["1"].group == "When the constructor runs, perform these steps:"
+    assert by["L2/1"].group == "To obtain a connection, given k:"
+    assert {s.group for s in steps if not s.number.startswith("L2/")} == {by["1"].group}
+
+
+def test_lazy_repeated_numbers_stay_unique():
+    steps = spec.parse_steps("W", "x", "1. a\n1. b\n1. c\n")
+    assert len({s.id for s in steps}) == 3

@@ -9,6 +9,7 @@
 <header id="bar">
   <strong id="title"></strong>
   <span id="summary"></span>
+  <span id="cache-note"></span>
   <span class="sep"></span>
   <label><input type="checkbox" id="f-steps"> unimplemented steps</label>
   <label><input type="checkbox" id="f-code"> unexplained code</label>
@@ -17,7 +18,7 @@
   <span class="sep"></span>
   <span id="spec-chips"></span>
   <input id="add-spec" placeholder="SPEC#anchor or URL">
-  <button id="rerun">Re-run</button>
+  <button id="rerun" title="Analyze again, ignoring the cache">Re-run</button>
   <span id="legend"></span>
 </header>
 <div id="notes" hidden></div>
@@ -50,6 +51,7 @@
     </div>
   </section>
 </main>
+<div id="ctxmenu" hidden></div>
 <script src="app.js"></script>
 </body>
 </html>

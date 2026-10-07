@@ -6,6 +6,13 @@ const COLOR = {
 };
 const LOW = 0.5;
 
+const VERDICT = {
+  compliant: {label: "ok", cls: "ok"}, partial: {label: "partial", cls: "partial"},
+  "non-compliant": {label: "fail", cls: "fail"}, unclear: {label: "?", cls: "unclear"},
+};
+const MANUAL_TIP = "Not available in manual (no-AI) mode";
+
+let checks = {}, running = new Set(), checkErrors = {}, detailStep = null;
 let D, linksByStep, linksByLine, stepsById, docOf, stepEls, rowEls, hits = [], hitIdx = 0, curUrl = null;
 
 const el = (tag, cls, text) => {
@@ -29,6 +36,8 @@ function index() {
   linksByLine = {};
   stepsById = {};
   docOf = {};
+  checks = {...D.checks};
+  checkErrors = {};
   D.analysis.docs.forEach((d) =>
     d.steps.forEach((s) => {
       stepsById[s.id] = s;
@@ -46,10 +55,15 @@ function render() {
   stepEls = {};
   rowEls = {};
   hits = [];
+  detailStep = null;
   $("title").textContent = D.patch.id;
   const s = D.summary;
   const counts = Object.entries(s.steps).map(([k, v]) => `${v} ${k}`).join(", ");
   $("summary").textContent = `${counts}; ${s.unexplained_lines}/${s.added_lines} added lines unexplained`;
+  const a = D.analysis;
+  const note = $("cache-note");
+  note.textContent = a.created_at ? `${a.cached ? "cached" : "fresh"} ${a.created_at.replace("T", " ").replace(/\+.*$/, "")} UTC` : "";
+  note.title = a.cached ? "Loaded from the cache; Re-run to analyze again" : "Analyzed just now";
   renderLegend();
   renderSpecs();
   renderNotes();
@@ -122,16 +136,26 @@ function renderSpecPane() {
     open.rel = "noopener";
     head.append(open);
     pane.append(head);
+    const grouped = new Set(d.steps.map((x) => x.group)).size > 1;
+    let group = null;
     for (const s of d.steps) {
+      if (grouped && s.group !== group) pane.append(el("div", "group-head", s.group || "steps"));
+      group = s.group;
       const st = D.step_status[s.id];
       const row = el("div", `step st-${st}`);
       row.dataset.id = s.id;
       row.title = s.text;
       row.style.paddingLeft = `${4 + 16 * s.depth}px`;
-      row.append(el("span", "num", s.number), el("span", "text", s.title || s.text), el("span", "badge", KIND_LABEL[st]));
+      row.append(el("span", "num", s.number), el("span", "text", s.title || s.text), el("span", "chk"), el("span", "badge", KIND_LABEL[st]));
       row.onclick = () => selectStep(s.id);
+      row.oncontextmenu = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openMenu(e, s.id);
+      };
       pane.append(row);
       stepEls[s.id] = row;
+      updateRowCheck(s.id);
       const tick = el("div");
       tick.style.background = COLOR[st];
       tick.onclick = () => row.scrollIntoView({block: "center"});
@@ -339,7 +363,8 @@ function collapseDetail() {
   $("detail-toggle").textContent = "show";
 }
 
-function showStepDetail(id) {
+function fillStepDetail(id) {
+  detailStep = id;
   const s = stepsById[id];
   const body = $("detail-body");
   body.replaceChildren(el("div", "", `${s.number} ${s.text}`));
@@ -347,10 +372,18 @@ function showStepDetail(id) {
   if (!idxs.length) body.append(el("div", "item", `No code maps to this step (${D.step_status[id]}).`));
   idxs.forEach((i) => body.append(linkItem(i, true)));
   if (hits.length) body.append(el("div", "item", `${hits.length} lines; n / p to step through`));
+  const comp = complianceSection(id);
+  if (comp) body.append(comp);
+}
+
+function showStepDetail(id) {
+  fillStepDetail(id);
+  const s = stepsById[id];
   setDetail(`Step ${s.number}: ${s.title || s.text}`);
 }
 
 function showLineDetail(key, idxs) {
+  detailStep = null;
   const body = $("detail-body");
   body.replaceChildren();
   idxs.forEach((i) => body.append(linkItem(i, true)));
@@ -361,6 +394,157 @@ function showLineDetail(key, idxs) {
       }
   if (!body.childNodes.length) body.append(el("div", "", (kindsFor(key)[0] || "context line")));
   setDetail(`Line ${key.slice(key.lastIndexOf(":") + 2)}`);
+}
+
+function updateRowCheck(id) {
+  const pill = stepEls[id]?.querySelector(".chk");
+  if (!pill) return;
+  const r = checks[id];
+  pill.className = "chk";
+  pill.removeAttribute("title");
+  if (running.has(id)) {
+    pill.classList.add("running");
+    pill.textContent = "checking...";
+    pill.title = "AI compliance check in progress";
+  } else if (r) {
+    pill.classList.add(`v-${VERDICT[r.verdict].cls}`);
+    pill.textContent = VERDICT[r.verdict].label;
+    pill.title = `${r.verdict}: ${r.summary}`;
+  } else {
+    pill.textContent = "";
+  }
+}
+
+async function runCheck(id, force) {
+  running.add(id);
+  delete checkErrors[id];
+  refreshCheck(id);
+  try {
+    const r = await fetch("/api/check", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({step_id: id, force}),
+    });
+    if (r.ok) checks[id] = await r.json();
+    else {
+      let msg = `HTTP ${r.status}`;
+      try {
+        msg = (await r.json()).detail || msg;
+      } catch (_) {}
+      checkErrors[id] = msg;
+    }
+  } catch (err) {
+    checkErrors[id] = err.message;
+  } finally {
+    running.delete(id);
+    refreshCheck(id);
+  }
+}
+
+function refreshCheck(id) {
+  updateRowCheck(id);
+  if (detailStep === id && stepsById[id]) fillStepDetail(id);
+}
+
+function jumpTo(file, line) {
+  const row = rowEls[lk(file, "new", line)];
+  if (!row) return;
+  row.scrollIntoView({block: "center"});
+  row.classList.remove("flash");
+  void row.offsetWidth;
+  row.classList.add("flash");
+  setTimeout(() => row.classList.remove("flash"), 1500);
+}
+
+function locLink(file, line) {
+  if (!file) return null;
+  const text = line ? `${file}:${line}` : file;
+  if (!line || !rowEls[lk(file, "new", line)]) return el("span", "loc", text);
+  const a = el("a", "loc link", text);
+  a.href = "#";
+  a.onclick = (e) => {
+    e.preventDefault();
+    jumpTo(file, line);
+  };
+  return a;
+}
+
+function complianceSection(id) {
+  const r = checks[id];
+  if (!r && !running.has(id) && !checkErrors[id]) return null;
+  const box = el("div", "item comp");
+  const head = el("div", "comp-head");
+  head.append(el("strong", "", "Compliance (AI)"));
+  if (running.has(id)) {
+    head.append(el("span", "chk running", "checking..."));
+    box.append(head);
+    return box;
+  }
+  if (r) {
+    const v = el("span", `chk v-${VERDICT[r.verdict].cls}`, r.verdict);
+    head.append(v);
+  }
+  const btn = el("button", "", r ? "Re-check" : "Retry");
+  btn.disabled = !D.ai_enabled;
+  btn.onclick = () => runCheck(id, true);
+  head.append(btn);
+  box.append(head);
+  if (checkErrors[id]) box.append(el("div", "cerr", `check failed: ${checkErrors[id]}`));
+  if (!r) return box;
+  box.append(el("div", "", r.summary));
+  if (r.issues.length) {
+    const ul = el("ul", "comp-list");
+    for (const i of r.issues) {
+      const li = el("li");
+      li.append(el("span", `sev sev-${i.severity}`, i.severity), " ", i.text);
+      const loc = locLink(i.file, i.line);
+      if (loc) li.append(" ", loc);
+      ul.append(li);
+    }
+    box.append(el("div", "comp-sub", "Issues"), ul);
+  }
+  if (r.evidence.length) {
+    const ul = el("ul", "comp-list");
+    for (const e of r.evidence) {
+      const li = el("li");
+      li.append(locLink(e.file, e.line), " ", e.note);
+      ul.append(li);
+    }
+    box.append(el("div", "comp-sub", "Evidence"), ul);
+  }
+  if (r.context_used.length) box.append(el("div", "comp-sub", `Context used: ${r.context_used.join(", ")}`));
+  return box;
+}
+
+function closeMenu() {
+  $("ctxmenu").hidden = true;
+}
+
+function openMenu(ev, id) {
+  const menu = $("ctxmenu");
+  menu.replaceChildren();
+  const hasResult = !!checks[id];
+  const chk = el("div", "mi", `${hasResult ? "Re-check" : "Check"} compliance with AI`);
+  if (!D.ai_enabled || running.has(id)) {
+    chk.classList.add("disabled");
+    chk.title = D.ai_enabled ? "A check for this step is already running" : MANUAL_TIP;
+  } else {
+    chk.onclick = () => {
+      closeMenu();
+      runCheck(id, hasResult);
+    };
+  }
+  const sel = el("div", "mi", "Select step");
+  sel.onclick = () => {
+    closeMenu();
+    selectStep(id);
+  };
+  menu.append(chk, sel);
+  menu.hidden = false;
+  const x = Math.min(ev.clientX, window.innerWidth - menu.offsetWidth - 2);
+  const y = Math.min(ev.clientY, window.innerHeight - menu.offsetHeight - 2);
+  menu.style.left = `${Math.max(0, x)}px`;
+  menu.style.top = `${Math.max(0, y)}px`;
 }
 
 function inRange(key, r) {
@@ -396,7 +580,15 @@ function applyFilters() {
 }
 
 document.querySelectorAll("#bar input[type=checkbox]").forEach((c) => (c.onchange = applyFilters));
+document.addEventListener("click", closeMenu);
+document.addEventListener("contextmenu", closeMenu);
+window.addEventListener("scroll", closeMenu, true);
+window.addEventListener("blur", closeMenu);
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("ctxmenu").hidden) {
+    closeMenu();
+    return;
+  }
   if (e.target.tagName === "INPUT") return;
   if (e.key === "n") jump(1);
   else if (e.key === "p") jump(-1);

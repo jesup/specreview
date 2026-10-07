@@ -1,12 +1,13 @@
 from pathlib import Path
 from typing import Callable, Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .claude import ClaudeError
 from .coverage import line_status, step_status, summarize
-from .models import Analysis, Patch
+from .models import Analysis, ComplianceResult, Patch
 from .store import Overrides, link_key
 
 STATIC = Path(__file__).parent / "static"
@@ -14,15 +15,26 @@ STATIC = Path(__file__).parent / "static"
 
 class ReviewState:
     def __init__(self, patch: Patch, analysis: Analysis, overrides: Overrides,
-                 rerun: Callable[[list[str]], Analysis]):
+                 rerun: Callable[[list[str]], Analysis],
+                 checker: Callable[[str, bool], ComplianceResult] | None = None,
+                 ai_enabled: bool = False,
+                 cached_checks: Callable[[], dict[str, ComplianceResult]] | None = None):
         self.patch = patch
         self.analysis = analysis
         self.overrides = overrides
         self.rerun = rerun
+        self.checker = checker
+        self.ai_enabled = ai_enabled
+        self.cached_checks = cached_checks
 
 
 class RerunBody(BaseModel):
     specs: list[str]
+
+
+class CheckBody(BaseModel):
+    step_id: str
+    force: bool = False
 
 
 class VerdictBody(BaseModel):
@@ -41,6 +53,8 @@ def build_payload(state: ReviewState) -> dict:
         "summary": summarize(st, ls, state.patch),
         "overrides": state.overrides.all(),
         "link_keys": [link_key(l) for l in a.links],
+        "ai_enabled": state.ai_enabled,
+        "checks": {k: v.model_dump() for k, v in (state.cached_checks() if state.cached_checks else {}).items()},
     }
 
 
@@ -55,6 +69,17 @@ def create_app(state: ReviewState) -> FastAPI:
     def rerun(body: RerunBody):
         state.analysis = state.rerun(body.specs)
         return build_payload(state)
+
+    @app.post("/api/check")
+    def check(body: CheckBody):
+        if not state.ai_enabled or state.checker is None:
+            raise HTTPException(409, "AI checks are not available in manual mode")
+        if body.step_id not in {s.id for s in state.analysis.steps()}:
+            raise HTTPException(404, f"unknown step {body.step_id}")
+        try:
+            return state.checker(body.step_id, body.force)
+        except ClaudeError as e:
+            raise HTTPException(502, str(e))
 
     @app.put("/api/overrides/{key}")
     def override(key: str, body: VerdictBody):

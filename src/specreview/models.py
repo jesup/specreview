@@ -29,10 +29,11 @@ class Patch(BaseModel):
     id: str
     parent_ids: list[str] = Field(default_factory=list)
     description: str = ""
+    source: str = ""
     files: list[FileDiff]
 
     def digest(self) -> str:
-        data = self.model_dump_json(exclude={"id", "parent_ids"})
+        data = self.model_dump_json(exclude={"id", "parent_ids", "source"})
         return hashlib.sha256(data.encode()).hexdigest()[:16]
 
     def file(self, path: str) -> FileDiff | None:
@@ -48,6 +49,7 @@ class Step(BaseModel):
     title: str = ""
     target: str | None = None
     depth: int = 0
+    group: str = ""
 
     @computed_field
     @property
@@ -95,6 +97,28 @@ class Finding(BaseModel):
     range: Range | None = None
 
 
+class ComplianceIssue(BaseModel):
+    text: str
+    severity: Literal["info", "warn", "error"]
+    file: str | None = None
+    line: int | None = None
+
+
+class ComplianceEvidence(BaseModel):
+    file: str
+    line: int
+    note: str
+
+
+class ComplianceResult(BaseModel):
+    step_id: str
+    verdict: Literal["compliant", "partial", "non-compliant", "unclear"]
+    summary: str
+    issues: list[ComplianceIssue] = Field(default_factory=list)
+    evidence: list[ComplianceEvidence] = Field(default_factory=list)
+    context_used: list[str] = Field(default_factory=list)
+
+
 class MapperOutput(BaseModel):
     links: list[Link]
     unmapped: list[Unmapped]
@@ -108,6 +132,8 @@ class Analysis(BaseModel):
     unmapped: list[Unmapped] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    created_at: str = ""
+    cached: bool = False
 
     def steps(self) -> list[Step]:
         return [s for d in self.docs for s in d.steps]

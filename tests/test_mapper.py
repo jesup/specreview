@@ -44,3 +44,16 @@ def test_map_fills_patch_id_and_parses(patch, doc):
     assert out.findings[0].patch_id == "p1"
     assert captured["kw"] == {"cwd": "/r", "model": "m"}
     assert "links" in captured["schema"]["properties"]
+
+
+def test_render_steps_shows_group_headers_only_when_several():
+    from specreview.models import SpecDoc, Step
+
+    def step(n, g):
+        return Step(spec="S", anchor="a", number=n, text="t" + n, group=g)
+
+    one = SpecDoc(ref="S#a", sha="h", title="a", url="u", anchor="a", steps=[step("1", "g")])
+    assert "--" not in render_steps([one])
+    two = one.model_copy(update={"steps": [step("1", "first"), step("L2/1", "second")]})
+    text = render_steps([two])
+    assert "-- first" in text and "-- second" in text

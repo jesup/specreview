@@ -3,6 +3,8 @@ from .hints import spec_urls
 from .models import Patch
 from .spec import spec_exists
 
+DISCOVERY_PROMPT_VERSION = "1"
+
 REFS_SCHEMA = {
     "type": "object",
     "properties": {"refs": {"type": "array", "items": {"type": "string"}}},

@@ -2,6 +2,9 @@ import json
 import subprocess
 
 
+DEFAULT_TOOLS = ["Read", "Grep", "Glob"]
+
+
 class ClaudeError(Exception):
     pass
 
@@ -13,12 +16,15 @@ def run_claude(
     cwd: str | None = None,
     model: str | None = None,
     timeout: int = 1800,
+    tools: list[str] | None = None,
 ) -> dict:
     cmd = [
         "claude", "-p",
         "--output-format", "json",
         "--json-schema", json.dumps(schema),
-        "--allowedTools", "Read,Grep,Glob",
+        "--permission-mode", "dontAsk",
+        "--settings", json.dumps({"sandbox": {"autoAllowBashIfSandboxed": False}}),
+        "--allowedTools", ",".join(tools or DEFAULT_TOOLS),
     ]
     if model:
         cmd += ["--model", model]

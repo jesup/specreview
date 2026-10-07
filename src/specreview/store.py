@@ -3,7 +3,9 @@ import json
 import os
 from pathlib import Path
 
-from .models import Analysis, Link, Patch, SpecDoc
+from .compliance import COMPLIANCE_PROMPT_VERSION
+from .discovery import DISCOVERY_PROMPT_VERSION
+from .models import Analysis, ComplianceResult, Link, Patch, SpecDoc
 
 
 def default_root() -> Path:
@@ -18,7 +20,10 @@ def link_key(link: Link) -> str:
 
 class Cache:
     def __init__(self, root: Path | None = None):
-        self.dir = (root or default_root()) / "analysis"
+        base = root or default_root()
+        self.dir = base / "analysis"
+        self.compliance_dir = base / "compliance"
+        self.discovery_dir = base / "discovery"
 
     def key(self, patch: Patch, docs: list[SpecDoc], prompt_version: str, model: str | None) -> str:
         parts = [patch.digest(), prompt_version, model or ""]
@@ -33,6 +38,30 @@ class Cache:
         self.dir.mkdir(parents=True, exist_ok=True)
         (self.dir / f"{key}.json").write_text(analysis.model_dump_json())
 
+    def discovery_key(self, patch: Patch, model: str | None) -> str:
+        parts = [patch.digest(), DISCOVERY_PROMPT_VERSION, model or ""]
+        return hashlib.sha256("|".join(parts).encode()).hexdigest()[:24]
+
+    def get_refs(self, key: str) -> list[str] | None:
+        p = self.discovery_dir / f"{key}.json"
+        return json.loads(p.read_text()) if p.exists() else None
+
+    def put_refs(self, key: str, refs: list[str]) -> None:
+        self.discovery_dir.mkdir(parents=True, exist_ok=True)
+        (self.discovery_dir / f"{key}.json").write_text(json.dumps(refs))
+
+    def compliance_key(self, patch: Patch, doc: SpecDoc, step_id: str, model: str | None) -> str:
+        parts = [patch.digest(), f"{doc.ref}@{doc.sha}", step_id, COMPLIANCE_PROMPT_VERSION, model or ""]
+        return hashlib.sha256("|".join(parts).encode()).hexdigest()[:24]
+
+    def get_compliance(self, key: str) -> ComplianceResult | None:
+        p = self.compliance_dir / f"{key}.json"
+        return ComplianceResult.model_validate_json(p.read_text()) if p.exists() else None
+
+    def put_compliance(self, key: str, result: ComplianceResult) -> None:
+        self.compliance_dir.mkdir(parents=True, exist_ok=True)
+        (self.compliance_dir / f"{key}.json").write_text(result.model_dump_json())
+
 
 class NullCache(Cache):
     def __init__(self):
@@ -45,6 +74,24 @@ class NullCache(Cache):
         return None
 
     def put(self, key: str, analysis: Analysis) -> None:
+        pass
+
+    def discovery_key(self, patch: Patch, model: str | None) -> str:
+        return ""
+
+    def get_refs(self, key: str) -> list[str] | None:
+        return None
+
+    def put_refs(self, key: str, refs: list[str]) -> None:
+        pass
+
+    def compliance_key(self, patch: Patch, doc: SpecDoc, step_id: str, model: str | None) -> str:
+        return ""
+
+    def get_compliance(self, key: str) -> ComplianceResult | None:
+        return None
+
+    def put_compliance(self, key: str, result: ComplianceResult) -> None:
         pass
 
 

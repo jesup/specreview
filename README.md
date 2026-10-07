@@ -26,11 +26,14 @@ uv run specreview --example|--example-file [--port 8765] [--no-open]
   from a file or stdin; see "Whole-file input".
 - `--spec SPEC#anchor` (or a spec URL): repeatable. Without it, specs are
   discovered from spec URLs in the patch comments, falling back to a Claude
-  query. Discovery is not cached and can differ between runs; pass `--spec`
-  for reproducible results.
+  query. The discovered refs are cached with the analysis (see "Caches and
+  overrides"); pass `--spec` to choose them yourself.
 - `--repo`: repository used for `jj` and as Claude's working directory for
   reading context.
-- `--refresh`: ignore the cached analysis.
+- `--refresh`: ignore the cached analysis and discovery and replace them with fresh
+  ones. The Re-run button in the UI does the same. Compliance checks have
+  their own Re-check button.
+- `--no-cache`: neither read nor write the cache for this run.
 - `--manual` (alias `--no-ai`): build the mapping from `<spec>` annotations in
   the patch, with no Claude calls; see "Manual mode".
 - `--example`: no source needed; analyzes the bundled example patch in manual
@@ -160,12 +163,62 @@ the detail strip.
 - Specs without a numbered algorithm (for example IETF drafts) are split into
   paragraph items numbered by their section anchor (`6.3-1`).
 
+## Compliance check (AI)
+
+Right-click an outline row and pick "Check compliance with AI" (or "Re-check")
+to ask Claude whether the code satisfies that one spec entry (a numbered
+algorithm step or an IETF paragraph item). The prompt contains the whole patch
+(numbered as in the diff view), the full spec text with the entry marked, the
+ranges mapped to the entry and the patch source; Claude judges only that
+entry and decides how to gather more context. The row shows a "checking..."
+pill, then a small bordered pill (ok / partial / fail / ?; dark green, amber,
+red, gray) with the summary as its tooltip. Selecting the step shows a
+"Compliance (AI)" section in the detail strip: verdict, summary, issues and
+evidence (file:line entries that exist in the patch are clickable and scroll
+the diff there), the context Claude says it used, and a Re-check button.
+Several steps can be checked at the same time. Results are cached per patch,
+spec SHA, step and model, and are shown again after a reload; Re-check forces a
+new run.
+
+Context and tools, with all of them read-only (`claude -p` runs in `dontAsk`
+mode with Bash auto-approval turned off, so anything not listed is denied):
+
+- Allowed: `Read`, `Grep`, `Glob`, `Bash(searchfox-cli:*)`,
+  `Bash(webspec-index:*)`, `Bash(jj log|show|diff|file show:*)` and `WebFetch`
+  for `phabricator.services.mozilla.com` (and the CDN host its raw diffs
+  redirect to).
+- With `--repo` (or a `jj:REV` source with `--repo`), Claude runs with the
+  repository as its working directory. The prompt says the working copy may
+  not contain the patch's changes: the patch text is authoritative for changed
+  code and the repository is for surrounding code, callers, headers and IDL.
+- Without a repository, Claude is told to use `searchfox-cli` for code already
+  merged upstream (searchfox does not contain the patch).
+- For a Phabricator source (`D12345`) Claude may look at the other revisions
+  of the stack and fetch their diffs (`/D<N>?download=true`); for `jj:REV` with
+  `--repo` it may use `jj log`, `jj show`, `jj diff` and `jj file show`.
+- Not available with `--manual`: the menu item is disabled and the server
+  answers 409.
+
+Each check is a full Claude run with tool use, so it can take a minute or
+more and costs real tokens; use `--model` to pick a cheaper model. A verdict
+of "unclear" means the available context could not decide.
+
 ## Caches and overrides
 
 Under `~/.cache/specreview` (or `$XDG_CACHE_HOME/specreview`):
 
-- `analysis/<key>.json`: the analysis, keyed by the patch digest (which
-  includes the description), prompt version, model and the spec content SHAs.
+- `analysis/<key>.json`: the analysis, keyed by the patch digest, prompt
+  version, model and the spec content SHAs. The patch digest is a SHA-256 of
+  the patch contents (every file, hunk and line, plus the commit message), so
+  any change to the source invalidates the entry; so does a changed spec
+  (the SHA `webspec-index` reports; run `webspec-index update` to refresh its
+  index), a new prompt version or a different `--model`. The UI shows
+  whether the loaded result is "cached" or "fresh" with its timestamp.
+- `discovery/<key>.json`: the spec refs found for a patch when no `--spec`
+  was given, keyed by the patch digest, discovery prompt version and model.
+  Empty results are not cached.
+- `compliance/<key>.json`: AI compliance results, keyed by the patch digest,
+  spec ref and SHA, step id, compliance prompt version and model.
 - `overrides/<digest>.json`: your per-link "ok" / "wrong" verdicts.
 
 ## How mapping works

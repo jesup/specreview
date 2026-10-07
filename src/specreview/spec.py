@@ -40,10 +40,19 @@ def _parse_list(spec: str, anchor: str, content: str) -> list[Step]:
     steps: list[Step] = []
     texts: list[str] = []
     stack: list[str] = []
+    lists = 0
+    prefix = ""
+    group = ""
+    intro = ""
     for line in content.splitlines():
         m = _ITEM.match(line)
         if m:
             depth = len(m.group(1).replace("\t", "    ")) // 4
+            top = depth == 0
+            if top and (not stack or int(m.group(2)) <= int(stack[0])):
+                lists += 1
+                prefix = f"L{lists}/" if lists > 1 else ""
+                group = _title(_clean(intro)) if intro else ""
             del stack[depth:]
             stack.append(m.group(2))
             parent = ".".join(stack[:-1]) or None
@@ -51,15 +60,18 @@ def _parse_list(spec: str, anchor: str, content: str) -> list[Step]:
                 Step(
                     spec=spec,
                     anchor=anchor,
-                    number=".".join(stack),
+                    number=prefix + ".".join(stack),
                     text="",
-                    parent=f"{spec}#{anchor}:{parent}" if parent else None,
+                    parent=f"{spec}#{anchor}:{prefix}{parent}" if parent else None,
                     depth=len(stack) - 1,
+                    group=group,
                 )
             )
             texts.append(m.group(3))
         elif steps and line.strip() and line[0] in " \t":
             texts[-1] += " " + line.strip()
+        elif line.strip():
+            intro = line
     out = []
     for s, t in zip(steps, texts):
         text = _clean(t)

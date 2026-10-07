@@ -22,3 +22,14 @@ def test_analysis_steps(analysis):
     assert isinstance(analysis.links[0], Link)
     assert isinstance(analysis.links[0].ranges[0], Range)
     assert isinstance(analysis, Analysis)
+
+
+def test_patch_digest_ignores_source(patch):
+    assert patch.digest() == patch.model_copy(update={"source": "D1"}).digest()
+
+
+def test_compliance_result_schema():
+    from specreview.models import ComplianceResult
+
+    props = ComplianceResult.model_json_schema()["properties"]
+    assert {"step_id", "verdict", "summary", "issues", "evidence", "context_used"} <= set(props)

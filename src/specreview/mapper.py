@@ -4,7 +4,7 @@ from .claude import run_claude
 from .hints import Hint
 from .models import MapperOutput, Patch, SpecDoc
 
-PROMPT_VERSION = "2"
+PROMPT_VERSION = "3"
 
 INSTRUCTIONS = """You are reviewing a code patch against the specification steps it implements.
 Produce a careful, honest mapping between spec steps and diff line ranges.
@@ -60,7 +60,11 @@ def render_steps(docs: list[SpecDoc]) -> str:
     out = []
     for d in docs:
         out.append(f"SPEC {d.ref} ({d.title}) {d.url}")
+        group = None
         for s in d.steps:
+            if s.group != group and len({x.group for x in d.steps}) > 1:
+                out.append(f"-- {s.group or 'steps'}")
+            group = s.group
             out.append(f"{'  ' * s.depth}[{s.id}] {s.text}")
     return "\n".join(out)
 

@@ -9,6 +9,7 @@ import uvicorn
 
 from . import ingest
 from .annotations import AnnotationMapper, annotation_refs
+from .compliance import ComplianceChecker
 from .discovery import discover_refs
 from .mapper import ClaudeMapper
 from .pipeline import NoSpecs, analyze
@@ -28,7 +29,8 @@ def parse_args(argv=None):
     p.add_argument("--repo", help="repository for jj and for Claude's context")
     p.add_argument("--model", help="claude model alias")
     p.add_argument("--port", type=int, default=8765)
-    p.add_argument("--refresh", action="store_true", help="ignore cached analysis")
+    p.add_argument("--refresh", action="store_true", help="ignore cached results and replace them")
+    p.add_argument("--no-cache", action="store_true", help="neither read nor write the cache")
     p.add_argument("--manual", "--no-ai", dest="manual", action="store_true", help="map from <spec> annotations in the patch, without Claude")
     p.add_argument("--example", action="store_true", help="show the bundled manual-mode example (implies --manual)")
     p.add_argument("--example-file", action="store_true", help="show the bundled whole-file manual-mode example (implies --manual)")
@@ -45,6 +47,33 @@ def parse_args(argv=None):
 
 def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
+
+
+def compliance_hooks(state, checker, cache, model):
+    def locate(step_id):
+        doc = next(d for d in state.analysis.docs if any(s.id == step_id for s in d.steps))
+        step = next(s for s in doc.steps if s.id == step_id)
+        return doc, step
+
+    def check(step_id, force):
+        doc, step = locate(step_id)
+        key = cache.compliance_key(state.patch, doc, step_id, model)
+        if not force and (hit := cache.get_compliance(key)):
+            return hit
+        links = [l for l in state.analysis.links if l.step_id == step_id]
+        result = checker.check(state.patch, doc, step, links)
+        cache.put_compliance(key, result)
+        return result
+
+    def cached():
+        found = {}
+        for doc in state.analysis.docs:
+            for s in doc.steps:
+                if hit := cache.get_compliance(cache.compliance_key(state.patch, doc, s.id, model)):
+                    found[s.id] = hit
+        return found
+
+    return check, cached
 
 
 def main(argv=None) -> int:
@@ -69,7 +98,7 @@ def main(argv=None) -> int:
     else:
         opts = dict(
             mapper=ClaudeMapper(repo=args.repo, model=args.model),
-            cache=Cache(),
+            cache=NullCache() if args.no_cache else Cache(),
             discover=partial(discover_refs, repo=args.repo, model=args.model),
             model=args.model,
         )
@@ -90,7 +119,12 @@ def main(argv=None) -> int:
         log(f"error: {e}")
         return 1
 
-    app = create_app(ReviewState(patch, analysis, Overrides(None, patch), rerun))
+    state = ReviewState(patch, analysis, Overrides(None, patch), rerun)
+    if not args.manual:
+        checker = ComplianceChecker(repo=args.repo, model=args.model)
+        state.checker, state.cached_checks = compliance_hooks(state, checker, opts["cache"], args.model)
+        state.ai_enabled = True
+    app = create_app(state)
     url = f"http://127.0.0.1:{args.port}/"
     log(f"serving {url}")
     if not args.no_open:

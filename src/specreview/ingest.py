@@ -72,7 +72,9 @@ def from_phab(rev: str) -> Patch:
 
 def load(source: str, repo: str | None = None) -> Patch:
     if re.fullmatch(r"D\d+", source):
-        return from_phab(source)
-    if source.startswith("jj:"):
-        return from_jj(source[3:], repo)
-    return from_file(source)
+        patch = from_phab(source)
+    elif source.startswith("jj:"):
+        patch = from_jj(source[3:], repo)
+    else:
+        patch = from_file(source)
+    return patch.model_copy(update={"source": "stdin" if source == "-" else source})

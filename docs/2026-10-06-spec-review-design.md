@@ -195,3 +195,43 @@ None blocking v1.
   chunking, so large files give large prompts.
 - `--example-file` (implies `--manual`) shows the bundled whole-file example
   `examples/manual_example.cpp`; `--example` still shows the diff example.
+
+## Revision 4
+- Right-click compliance check on an outline row: `compliance.py` builds a
+  prompt (numbered diff, whole spec text with the entry marked TARGET, the
+  entry's mapped ranges, patch source, context guidance) and
+  `ComplianceChecker.check` returns a `ComplianceResult` (verdict
+  compliant / partial / non-compliant / unclear, summary, issues with optional
+  file:line, evidence, `context_used`); `step_id` is stamped by us.
+- Context is the AI's job; we only provide tools and say what exists. With
+  `--repo`, claude runs in the repo and is told the working copy may lack the
+  patch (the patch text is authoritative). Without it, the prompt points at
+  `searchfox-cli`. A Phabricator source (`Patch.source` = `D12345`) adds
+  stack guidance (raw diffs at `/D<N>?download=true`); a `jj:REV` source with
+  a repo adds read-only jj guidance. `Patch.source` is excluded from
+  `digest()`.
+- Tool list (`COMPLIANCE_TOOLS`): Read, Grep, Glob, Bash(searchfox-cli:*),
+  Bash(webspec-index:*), Bash(jj log|show|diff|file show:*) and WebFetch for
+  the Phabricator host. `run_claude` takes `tools`. Live testing showed the
+  `Bash(cmd:*)` and `WebFetch(domain:...)` forms work in headless mode, but
+  `--allowedTools` only pre-approves: with sandbox auto-allow on in the user's
+  settings, unlisted Bash commands (even `touch`) still ran. So `run_claude`
+  now always passes `--permission-mode dontAsk` and
+  `--settings {"sandbox":{"autoAllowBashIfSandboxed":false}}`, after which
+  unlisted commands and Edit/Write are denied. Phabricator raw diffs redirect
+  to `mozphab-phabhost-cdn.devsvcprod.mozaws.net`, which is allowed too.
+- Cache: `Cache.compliance_key/get_compliance/put_compliance` under
+  `<root>/compliance/`, keyed by patch digest, doc ref and sha, step id,
+  `COMPLIANCE_PROMPT_VERSION` and model (not the repo). `NullCache` never
+  stores.
+- Server: `ReviewState` gains `checker`, `ai_enabled` and `cached_checks`; the
+  payload carries `ai_enabled` and `checks` (cached results for the current
+  analysis). `POST /api/check` is a sync endpoint (threadpool): 409 when AI is
+  off, 404 for an unknown step, 502 on `ClaudeError` (invalid model output is
+  also a `ClaudeError`). The closure in `cli.compliance_hooks` looks the
+  step up in the current analysis at call time, so it follows `/api/rerun`.
+- UI: custom `#ctxmenu` on outline rows (closes on click, scroll, Escape;
+  disabled with a tooltip in manual mode or while that step runs), a bordered
+  pill on the row (distinct from the filled mapping badge), and a
+  "Compliance (AI)" section in the detail strip with clickable file:line
+  entries that scroll the diff. Errors show in the strip, not in an alert.
