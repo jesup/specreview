@@ -1,0 +1,64 @@
+diff --git a/dom/webtransport/api/WebTransportSendStream.cpp b/dom/webtransport/api/WebTransportSendStream.cpp
+index ba83c83db7..d79383e0ad 100644
+--- a/dom/webtransport/api/WebTransportSendStream.cpp
++++ b/dom/webtransport/api/WebTransportSendStream.cpp
+@@ -172,8 +172,26 @@
+ }
+ 
+ already_AddRefed<Promise> WebTransportSendStream::GetStats() {
++  // <spec> https://w3c.github.io/webtransport/#dom-webtransportsendstream-getstats
++  // Step 1: Let transport be this.[[Transport]].
++  WebTransportChild* child = mTransport ? mTransport->SendChild() : nullptr;
++
++  // Step 2: Let p be a new promise.
+   RefPtr<Promise> promise = Promise::CreateInfallible(WritableStream::mGlobal);
+-  promise->MaybeRejectWithNotSupportedError("GetStats isn't supported yet");
++  if (!child) {
++    promise->MaybeRejectWithInvalidStateError("No transport");
++    return promise.forget();
++  }
++
++  // Step 3.1: Let gatheredStats be the list of stats specific to this
++  // WebTransportSendStream needed to populate the dictionary members.
++  uint64_t id = mStreamId;
++
++  // Step 3.2.1: Let stats be a new WebTransportSendStreamStats object.
++  child->SendGetStats(id)->Then(
++      GetCurrentSerialEventTarget(), __func__,
++      [promise, self = RefPtr{this}](const SendStreamStatsResponse& aStats) {
++        WebTransportSendStreamStats stats;
+         stats.mBytesWritten.Construct(self->mBytesWritten);
+         stats.mBytesSent.Construct(aStats.bytesSent());
+         stats.mBytesAcknowledged.Construct(aStats.bytesAcknowledged());
+@@ -197,6 +215,11 @@
+         stats.mBytesLost.Construct(aStats.bytesLost());
+         stats.mBytesRetransmitted.Construct(aStats.bytesRetransmitted());
+         stats.mTimestamp = aStats.timestamp();
++        stats.mDatagrams.Construct(aStats.datagrams());
++
++        // Step 3.2.3: Resolve p with stats.
++        promise->MaybeResolve(stats);
++        // </spec>
+       },
+       [promise](const mozilla::ipc::ResponseRejectReason&) {
+         promise->MaybeRejectWithNotSupportedError("IPC failure");
+@@ -227,7 +250,10 @@
+   mHasPendingStats = true;
+   LOG(("GetStats requested for stream %u", mStreamId));
+ 
++  // Step 4: Return p.
++  mLastStatsPromise = promise;
+   LOG(("returning the stats promise"));
++  return promise.forget();
+ }
+ 
+ void WebTransportSendStream::SetSendOrder(Maybe<int64_t> aSendOrder) {
+@@ -264,3 +290,8 @@
+ 
+ void WebTransportSendStream::NotifyCachedStats() {
++  // <spec> https://w3c.github.io/webtransport/#dom-webtransportsendstream-getstats
++  // Step 3.2.3: Resolve p with stats.
++  mPendingStats->MaybeResolve(mCachedStats);
++  mPendingStats = nullptr;
++  // </spec>
+ }
