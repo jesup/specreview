@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>spec-review</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="bar">
+  <strong id="title"></strong>
+  <span id="summary"></span>
+  <span class="sep"></span>
+  <label><input type="checkbox" id="f-steps"> unimplemented steps</label>
+  <label><input type="checkbox" id="f-code"> unexplained code</label>
+  <label><input type="checkbox" id="f-low"> low confidence</label>
+  <label><input type="checkbox" id="f-dev"> deviations</label>
+  <span class="sep"></span>
+  <span id="spec-chips"></span>
+  <input id="add-spec" placeholder="SPEC#anchor or URL">
+  <button id="rerun">Re-run</button>
+  <span id="legend"></span>
+</header>
+<div id="notes" hidden></div>
+<main>
+  <section id="spec-pane" class="mode-split">
+    <div class="mm" id="spec-mm"></div>
+    <div id="spec-col">
+      <div id="modes">
+        <button data-mode="split" class="on">Split</button>
+        <button data-mode="rendered">Rendered</button>
+        <button data-mode="outline">Outline</button>
+      </div>
+      <div id="outline"></div>
+      <div id="rendered">
+        <div id="r-head">
+          <span id="r-title"></span>
+          <span id="r-target"></span>
+          <a id="r-open" target="_blank" rel="noopener" hidden>open in new tab</a>
+        </div>
+        <iframe id="r-frame" title="rendered spec"></iframe>
+      </div>
+    </div>
+  </section>
+  <section id="diff-pane">
+    <div id="diff-main"><div class="mm" id="diff-mm"></div><div id="diff" class="scroll"></div></div>
+    <div id="detail" class="collapsed">
+      <div id="detail-grip"></div>
+      <div id="detail-head"><span id="detail-title">Details</span><button id="detail-toggle">show</button></div>
+      <div id="detail-body"></div>
+    </div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
