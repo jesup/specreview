@@ -1,0 +1,187 @@
+diff --git a/dom/webtransport/api/WebTransportSendStream.cpp b/dom/webtransport/api/WebTransportSendStream.cpp
+index ba83c83db7..d79383e0ad 100644
+--- a/dom/webtransport/api/WebTransportSendStream.cpp
++++ b/dom/webtransport/api/WebTransportSendStream.cpp
+@@ -172,8 +172,77 @@
+ }
+ 
+ already_AddRefed<Promise> WebTransportSendStream::GetStats() {
++  // https://w3c.github.io/webtransport/#dom-webtransportsendstream-getstats
++  // Step 1: Let p be a new promise.
+   RefPtr<Promise> promise = Promise::CreateInfallible(WritableStream::mGlobal);
+-  promise->MaybeRejectWithNotSupportedError("GetStats isn't supported yet");
++
++  WebTransportChild* child = mTransport ? mTransport->SendChild() : nullptr;
++  if (!child) {
++    // Not in spec: if the transport IPC actor is gone, resolve immediately
++    // with the local bytesWritten count and the last-known network-side
++    // stats, since there is no transport left to query.
++    WebTransportSendStreamStats stats;
++    stats.mBytesWritten.Construct(mBytesWritten);
++    stats.mBytesSent.Construct(mCachedBytesSent);
++    stats.mBytesAcknowledged.Construct(mCachedBytesAcknowledged);
++    promise->MaybeResolve(stats);
++    return promise.forget();
++  }
++
++  // Step 2: Run the following steps in parallel:
++  // Step 2.1: Let gatheredStats be the list of stats specific to this
++  // WebTransportSendStream needed to populate the dictionary members of
++  // WebTransportSendStreamStats accurately.
++  // Implemented by sending an async IPC request to the networking process,
++  // which queries neqo for bytesSent and bytesAcknowledged. bytesWritten is
++  // read from mBytesWritten on the DOM thread at callback time rather than
++  // from neqo, because mBytesWritten is updated when write() resolves while
++  // neqo's value lags due to DataPipe buffering. The spec requires
++  // bytesAcknowledged <= bytesSent <= bytesWritten, and that bytesWritten only
++  // increases; see https://w3c.github.io/webtransport/#send-stream-stats
++  child->SendGetStreamStats(
++      mStreamId,
++      [self = RefPtr{this}, promise](Maybe<StreamStats>&& aStats) {
++        // Step 2.2: Queue a network task with transport to run the following:
++        // Step 2.2.1: Let stats be a new WebTransportSendStreamStats object.
++        WebTransportSendStreamStats stats;
++        // Step 2.2.2: For each member of stats that the user agent wishes to
++        // expose, set member to the corresponding entry in gatheredStats.
++        uint64_t bytesWritten = self->mBytesWritten;
++        stats.mBytesWritten.Construct(bytesWritten);
++        if (aStats) {
++          // aStats was sampled in the socket process (from neqo) earlier than
++          // this callback, and neqo lags mBytesWritten due to DataPipe
++          // buffering, so the counters come from different sample points.
++          // Clamp to preserve the spec invariants bytesSent <= bytesWritten
++          // and bytesAcknowledged <= bytesSent.
++          uint64_t bytesSent = std::min(aStats->bytesSent(), bytesWritten);
++          uint64_t bytesAcknowledged =
++              std::min(aStats->bytesAcknowledged(), bytesSent);
++          self->mCachedBytesSent = bytesSent;
++          self->mCachedBytesAcknowledged = bytesAcknowledged;
++          stats.mBytesSent.Construct(bytesSent);
++          stats.mBytesAcknowledged.Construct(bytesAcknowledged);
++        } else {
++          // neqo has dropped its per-stream tracking (e.g. the stream is
++          // done). Report the last-known values instead of zero, since the
++          // spec requires bytesSent/bytesAcknowledged to only increase.
++          stats.mBytesSent.Construct(self->mCachedBytesSent);
++          stats.mBytesAcknowledged.Construct(self->mCachedBytesAcknowledged);
++        }
++        // Step 2.2.3: Resolve p with stats.
++        promise->MaybeResolve(stats);
++      },
++      [self = RefPtr{this}, promise](mozilla::ipc::ResponseRejectReason) {
++        // Not in spec: IPC channel failed; resolve with local/cached stats.
++        WebTransportSendStreamStats stats;
++        stats.mBytesWritten.Construct(self->mBytesWritten);
++        stats.mBytesSent.Construct(self->mCachedBytesSent);
++        stats.mBytesAcknowledged.Construct(self->mCachedBytesAcknowledged);
++        promise->MaybeResolve(stats);
++      });
++
++  // Step 3: Return p.
+   return promise.forget();
+ }
+ 
+diff --git a/dom/webtransport/api/WebTransportSendStream.h b/dom/webtransport/api/WebTransportSendStream.h
+index 1593a250e4..e6d86cc2cf 100644
+--- a/dom/webtransport/api/WebTransportSendStream.h
++++ b/dom/webtransport/api/WebTransportSendStream.h
+@@ -79,6 +79,12 @@
+   already_AddRefed<WebTransportWriter> GetWriter(ErrorResult& aRv);
+ 
+   uint64_t GetBytesWritten() const { return mBytesWritten; }
++  // Last-known values from the network process, cached so that GetStats()
++  // (and WebTransportSendGroup::GetStats() aggregation) can still report
++  // accurate figures once neqo has dropped its per-stream tracking (see
++  // GetStats() below).
++  uint64_t GetBytesSent() const { return mCachedBytesSent; }
++  uint64_t GetBytesAcknowledged() const { return mCachedBytesAcknowledged; }
+   uint64_t GetCommittedOffset() const { return mCommittedOffset; }
+   void SetCommittedOffset(uint64_t aOffset) { mCommittedOffset = aOffset; }
+ 
+@@ -202,6 +208,8 @@
+   int64_t mSendOrder;
+   uint64_t mBytesWritten{0};
+   uint64_t mCommittedOffset{0};
++  uint64_t mCachedBytesSent{0};
++  uint64_t mCachedBytesAcknowledged{0};
+ 
+   // Queue of pending write operations (both regular and atomic writes)
+   mozilla::Queue<PendingWriteEntry> mPendingWrites;
+diff --git a/testing/web-platform/meta/webtransport/stream-stats.https.any.js.ini b/testing/web-platform/meta/webtransport/stream-stats.https.any.js.ini
+index 77945f7505..8c037f9747 100644
+--- a/testing/web-platform/meta/webtransport/stream-stats.https.any.js.ini
++++ b/testing/web-platform/meta/webtransport/stream-stats.https.any.js.ini
+@@ -1,16 +1,4 @@
+ [stream-stats.https.any.html]
+-  [WebTransportSendStream.getStats() returns a valid stats object]
+-    expected: FAIL
+-
+-  [WebTransportSendStream.getStats() tracks bytes written by the application]
+-    expected: FAIL
+-
+-  [WebTransportSendStream.getStats() bytesWritten is monotonically non-decreasing]
+-    expected: FAIL
+-
+-  [WebTransportSendStream.getStats() handles multiple concurrent calls]
+-    expected: FAIL
+-
+   [WebTransportReceiveStream.getStats() returns a valid stats object]
+     expected: FAIL
+ 
+@@ -36,18 +24,6 @@
+     expected: FAIL
+ 
+ [stream-stats.https.any.worker.html]
+-  [WebTransportSendStream.getStats() returns a valid stats object]
+-    expected: FAIL
+-
+-  [WebTransportSendStream.getStats() tracks bytes written by the application]
+-    expected: FAIL
+-
+-  [WebTransportSendStream.getStats() bytesWritten is monotonically non-decreasing]
+-    expected: FAIL
+-
+-  [WebTransportSendStream.getStats() handles multiple concurrent calls]
+-    expected: FAIL
+-
+   [WebTransportReceiveStream.getStats() returns a valid stats object]
+     expected: FAIL
+ 
+@@ -73,18 +49,6 @@
+     expected: FAIL
+ 
+ [stream-stats.https.any.sharedworker.html]
+-  [WebTransportSendStream.getStats() returns a valid stats object]
+-    expected: FAIL
+-
+-  [WebTransportSendStream.getStats() tracks bytes written by the application]
+-    expected: FAIL
+-
+-  [WebTransportSendStream.getStats() bytesWritten is monotonically non-decreasing]
+-    expected: FAIL
+-
+-  [WebTransportSendStream.getStats() handles multiple concurrent calls]
+-    expected: FAIL
+-
+   [WebTransportReceiveStream.getStats() returns a valid stats object]
+     expected: FAIL
+ 
+@@ -110,18 +74,6 @@
+     expected: FAIL
+ 
+ [stream-stats.https.any.serviceworker.html]
+-  [WebTransportSendStream.getStats() returns a valid stats object]
+-    expected: FAIL
+-
+-  [WebTransportSendStream.getStats() tracks bytes written by the application]
+-    expected: FAIL
+-
+-  [WebTransportSendStream.getStats() bytesWritten is monotonically non-decreasing]
+-    expected: FAIL
+-
+-  [WebTransportSendStream.getStats() handles multiple concurrent calls]
+-    expected: FAIL
+-
+   [WebTransportReceiveStream.getStats() returns a valid stats object]
+     expected: FAIL
+ 

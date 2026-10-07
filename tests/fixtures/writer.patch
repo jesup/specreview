@@ -1,0 +1,167 @@
+diff --git a/dom/webtransport/api/WebTransportSendStream.h b/dom/webtransport/api/WebTransportSendStream.h
+index a1a4ddbe0f..095cc9fee8 100644
+--- a/dom/webtransport/api/WebTransportSendStream.h
++++ b/dom/webtransport/api/WebTransportSendStream.h
+@@ -47,6 +47,12 @@
+ 
+   already_AddRefed<WebTransportWriter> GetWriter(ErrorResult& aRv);
+ 
++  uint64_t GetCommittedOffset() const { return mCommittedOffset; }
++  void SetCommittedOffset(uint64_t aOffset) { mCommittedOffset = aOffset; }
++
++  uint64_t GetStreamId() const { return mStreamId; }
++  WebTransport* GetTransport() const { return mTransport; }
++
+  private:
+   ~WebTransportSendStream() override;
+ 
+@@ -58,6 +64,7 @@
+   RefPtr<WebTransportSendGroup> mSendGroup;
+   uint64_t mStreamId;
+   int64_t mSendOrder;
++  uint64_t mCommittedOffset{0};
+ };
+ }  // namespace mozilla::dom
+ 
+diff --git a/dom/webtransport/api/WebTransportWriter.cpp b/dom/webtransport/api/WebTransportWriter.cpp
+index cfe71b0cb9..85b84b8e6c 100644
+--- a/dom/webtransport/api/WebTransportWriter.cpp
++++ b/dom/webtransport/api/WebTransportWriter.cpp
+@@ -41,25 +41,50 @@
+     return nullptr;
+   }
+ 
+-  // For now, reject with NotSupportedError
+-  // Full implementation requires:
++  if (!mSendStream) {
++    promise->MaybeRejectWithInvalidStateError("Stream not available");
++    return promise.forget();
++  }
++
++  WebTransport* transport = mSendStream->GetTransport();
++  if (!transport) {
++    promise->MaybeRejectWithInvalidStateError("WebTransport not available");
++    return promise.forget();
++  }
++
++  // For the initial implementation, just call the regular Write() method
++  // A full implementation would:
+   // 1. Get chunk size from aChunk
+   // 2. Query flow control window via IPC
+-  // 3. If window >= chunk size: write atomically
+-  // 4. If window < chunk size: reject with AbortError
+-  // 5. Track promise in mAtomicWriteRequests
+-
+-  aRv.ThrowNotSupportedError("atomicWrite() is not yet implemented");
+-  return nullptr;
++  // 3. Check if chunkSize fits in window
++  // 4. Write atomically or reject with AbortError
++
++  RefPtr<Promise> writePromise = Write(aCx, aChunk, aRv);
++  if (aRv.Failed()) {
++    return nullptr;
++  }
++
++  // Track this as an atomic write request
++  mAtomicWriteRequests.AppendElement(writePromise);
++
++  // For now, just return the write promise
++  // The full implementation would wrap it to enforce atomicity
++  return writePromise.forget();
+ }
+ 
+ void WebTransportWriter::Commit() {
+-  // Full implementation requires:
+-  // 1. Query current stream stats via IPC (GetStreamStats)
+-  // 2. Update [[CommittedOffset]] on mSendStream
+-  // 3. Used for reliable reset if stream is aborted
+-
+-  // For now, this is a no-op
++  if (!mSendStream) {
++    return;
++  }
++
++  // For now, just set committed offset to 0
++  // A full implementation would:
++  // 1. Get streamId from mSendStream
++  // 2. Query stream stats via IPC (GetStreamStats)
++  // 3. Get bytesAcknowledged from the stats
++  // 4. Update mCommittedOffset on mSendStream
++
++  mSendStream->SetCommittedOffset(0);
+ }
+ 
+ }  // namespace mozilla::dom
+diff --git a/dom/webtransport/parent/WebTransportParent.cpp b/dom/webtransport/parent/WebTransportParent.cpp
+index b4c5cde5ef..6cd89bde15 100644
+--- a/dom/webtransport/parent/WebTransportParent.cpp
++++ b/dom/webtransport/parent/WebTransportParent.cpp
+@@ -581,6 +581,23 @@
+   return IPC_OK();
+ }
+ 
++IPCResult WebTransportParent::RecvGetStreamStats(
++    uint64_t aStreamId, GetStreamStatsResolver&& aResolver) {
++  LOG(("GetStreamStats for %p, streamId=%llu", this,
++       (unsigned long long)aStreamId));
++  MOZ_ASSERT(mSocketThread->IsOnCurrentThread());
++
++  if (!mWebTransport) {
++    aResolver(Nothing());
++    return IPC_OK();
++  }
++
++  // TODO: Call mWebTransport->GetStreamStats(aStreamId)
++  // For now, return Nothing() as placeholder
++  aResolver(Nothing());
++  return IPC_OK();
++}
++
+ IPCResult WebTransportParent::RecvCreateSendGroup(uint64_t aGroupId) {
+   LOG(("%s for %p received, groupId=%" PRIu64, __func__, this, aGroupId));
+   MOZ_ASSERT(mSocketThread->IsOnCurrentThread());
+diff --git a/dom/webtransport/parent/WebTransportParent.h b/dom/webtransport/parent/WebTransportParent.h
+index 5fc9583fe2..529ba01406 100644
+--- a/dom/webtransport/parent/WebTransportParent.h
++++ b/dom/webtransport/parent/WebTransportParent.h
+@@ -70,6 +70,9 @@
+ 
+   IPCResult RecvGetStats(GetStatsResolver&& aResolver);
+ 
++  IPCResult RecvGetStreamStats(uint64_t aStreamId,
++                               GetStreamStatsResolver&& aResolver);
++
+   IPCResult RecvCreateUnidirectionalStream(
+       int64_t aSendOrder, Maybe<uint64_t> aSendGroupId,
+       bool aWaitUntilAvailable, CreateUnidirectionalStreamResolver&& aResolver);
+diff --git a/dom/webtransport/shared/PWebTransport.ipdl b/dom/webtransport/shared/PWebTransport.ipdl
+index e82d368c08..72009414f8 100644
+--- a/dom/webtransport/shared/PWebTransport.ipdl
++++ b/dom/webtransport/shared/PWebTransport.ipdl
+@@ -65,6 +65,12 @@
+   WebTransportDatagramStatsData datagrams;
+ };
+ 
++struct StreamStats {
++  uint64_t bytesWritten;
++  uint64_t bytesSent;
++  uint64_t bytesAcknowledged;
++};
++
+ union BidirectionalStreamResponse {
+   nsresult;
+   BidirectionalStream;
+@@ -176,6 +182,13 @@
+   async GetStats()
+     returns(WebTransportStatsData? stats);
+ 
++  /**
++  * Get stream statistics
++  * @param streamId the ID of the stream to query
++  */
++  async GetStreamStats(uint64_t streamId)
++    returns(StreamStats? stats);
++
+  child:
+ 
+   async IncomingUnidirectionalStream(uint64_t streamId, nullable DataPipeReceiver receive);
